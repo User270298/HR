@@ -5,7 +5,7 @@ from keyboard import start_keyboard, admin_keyboard, approved_keyboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import StateFilter
-from database import add_user, get_db, get_position_by_telegram_id
+from database import add_user, get_db, get_position_by_telegram_id, update_user_status
 
 router = Router()
 ADMIN_ID = [947159905]
@@ -132,7 +132,7 @@ async def send_confirmation(message: Message, state: FSMContext):
     telegram_id = user_data['telegram_id']
     async for db_session in get_db():
         position = await get_position_by_telegram_id(db_session, telegram_id)
-
+        await update_user_status(db_session, telegram_id, 'approved_admin')
     service_date = user_data['date']
     service_price = message.text
 
@@ -148,13 +148,51 @@ async def send_confirmation(message: Message, state: FSMContext):
                                    reply_markup=approved_keyboard(telegram_id))
 
 
-@router.message(F.data.startswith('conf_'))
-async def confirm_request(message: Message, state: FSMContext):
-    pass
+@router.callback_query(F.data.startswith('conf_'))
+async def confirm_user(callback: CallbackQuery, state: FSMContext):
+    telegram_id = int(callback.data.split('_')[1])
+    async for db_session in get_db():
+        await update_user_status(db_session, telegram_id, 'approved_user')
+    await callback.bot.send_message(chat_id=telegram_id,
+                                    text='Заявка подтверждена. На предоставленную электронную почту будет направлен Договор оказания услуг. Мы начнем поиск кандидата после предоставления Вами подписанного договора')
+
+
+@router.callback_query(F.data.startswith('canc_'))
+async def cancel_user(callback: CallbackQuery, state: FSMContext):
+    telegram_id = int(callback.data.split('_')[1])
+    async for db_session in get_db():
+        await update_user_status(db_session, telegram_id, 'cancel_user')
+    await callback.bot.send_message(chat_id=telegram_id, text='Заявка отменена.')
+
+
+class CancelRequestForm(StatesGroup):
+    answer_admin = State()
 
 
 @router.callback_query(F.data.startswith('cancel_'))
-async def approved(callback: CallbackQuery, state: FSMContext):
-    telegram_id = callback.data.split('_')[1]
-    await state.update_data(telegram_id=telegram_id)
-    await callback.bot.send_message(chat_id=telegram_id, text='Вашу заявку отклонили!')
+async def cancel_admin(callback: CallbackQuery, state: FSMContext):
+    telegram_id = callback.data.split('_')[1]  # Получаем telegram_id из данных кнопки
+    await state.update_data(telegram_id=telegram_id)  # Сохраняем telegram_id в состоянии
+    await callback.message.answer('Введите *причину* отказа:', parse_mode="Markdown")
+    await state.set_state(CancelRequestForm.answer_admin)
+
+
+@router.message(StateFilter(CancelRequestForm.answer_admin))
+async def description(message: Message, state: FSMContext):
+    # Получаем данные из состояния
+    user_data = await state.get_data()
+    answer_admin = message.text  # Текст с причиной отказа
+    telegram_id = user_data['telegram_id']  # Получаем telegram_id пользователя, чья заявка отклонена
+
+    # Отправляем сообщение пользователю с отказом
+    await message.bot.send_message(
+        chat_id=telegram_id,
+        text=f'Ваша заявка отклонена по следующей причине:\n\n{answer_admin}'
+    )
+    async for db_session in get_db():
+        await update_user_status(db_session, telegram_id, 'cancel_admin')
+    # Дополнительно, можно уведомить администратора о том, что отказ был отправлен
+    await message.bot.send_message(
+        chat_id=message.from_user.id,
+        text=f"Заявка пользователя {telegram_id} отклонена. Причина отказа: {answer_admin}"
+    )

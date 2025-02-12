@@ -85,7 +85,13 @@ async def get_status_by_telegram_id(db_session: AsyncSession, telegram_id: int):
 
 # Обновление статуса пользователя
 async def update_user_status(db_session: AsyncSession, telegram_id: int, new_status: str):
-    async with db_session.begin():
+    try:
+        # Выполняем обновление статуса пользователя
         stmt = update(User).where(User.telegram_id == telegram_id).values(status=new_status)
         await db_session.execute(stmt)
         await db_session.commit()
+    except Exception as e:
+        # Обрабатываем ошибки транзакции
+        print(f"Ошибка при обновлении статуса: {e}")
+        await db_session.rollback()
+
