@@ -1,3 +1,5 @@
+import re
+
 from aiogram import Router, F
 from aiogram.filters.command import Command
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
@@ -8,7 +10,7 @@ from aiogram.filters.state import StateFilter
 from database import add_user, get_db, get_position_by_telegram_id, update_user_status
 
 router = Router()
-ADMIN_ID = [947159905]
+ADMIN_ID = [947159905, 5584822662]
 
 
 @router.message(Command(commands=['start']))
@@ -57,6 +59,12 @@ async def contact_email(message: Message, state: FSMContext):
         contact_number = message.contact.phone_number
     else:
         contact_number = message.text
+
+    if not re.match(r'^(\+7|8)\d{10}$', contact_number):
+        await message.answer(
+            "Некорректный номер телефона. Пожалуйста, введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX.")
+        return
+
     await state.update_data(contact_number=contact_number)
     await message.answer("Введите *контактную почту*:", parse_mode="Markdown")
     await state.set_state(RequestForm.contact_email)
@@ -64,7 +72,11 @@ async def contact_email(message: Message, state: FSMContext):
 
 @router.message(StateFilter(RequestForm.contact_email))
 async def contact_person(message: Message, state: FSMContext):
+    if not re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', message.text):
+        await message.answer("Некорректный email. Пожалуйста, введите email в формате example@example.com.")
+        return
     await state.update_data(contact_email=message.text)
+
     await message.answer("Введите *контактное лицо*:", parse_mode="Markdown")
     await state.set_state(RequestForm.contact_person)
 
@@ -95,13 +107,13 @@ async def confirm_request(message: Message, state: FSMContext, bot):
         "Мы с вами свяжемся!", parse_mode="Markdown")
     for admin in ADMIN_ID:
         await message.bot.send_message(chat_id=admin, text=
-        f"✅ *Ваша заявка принята от {message.from_user.full_name}:*\n\n"
+        f"✅ *Поступила заявка от {message.from_user.full_name}:*\n\n"
         f"📌 *Компания:* {user_data['name']}\n"
         f"📌 *Позиция искомого кандидата:* {user_data['position']}\n"
         f"📌 *Контактный номер:* {user_data['contact_number']}\n"
         f"📌 *Почта:* {user_data['contact_email']}\n"
         f"📌 *Контактное лицо:* {user_data['contact_person']}\n\n"
-        "Мы с вами свяжемся!", parse_mode="Markdown",
+                                       , parse_mode="Markdown",
                                        reply_markup=admin_keyboard(message.from_user.id))
 
 
@@ -155,6 +167,12 @@ async def confirm_user(callback: CallbackQuery, state: FSMContext):
         await update_user_status(db_session, telegram_id, 'approved_user')
     await callback.bot.send_message(chat_id=telegram_id,
                                     text='Заявка подтверждена. На предоставленную электронную почту будет направлен Договор оказания услуг. Мы начнем поиск кандидата после предоставления Вами подписанного договора')
+    await callback.bot.send_message(
+        chat_id=telegram_id,
+        text='Приветствуем в нашем проекте по поиску, обучению и тестированию новых сотрудников!\n\n'
+             'Для составления заявки нажмите *«Продолжить»*',
+        reply_markup=start_keyboard(),
+        parse_mode="Markdown")
 
 
 @router.callback_query(F.data.startswith('canc_'))
@@ -163,6 +181,12 @@ async def cancel_user(callback: CallbackQuery, state: FSMContext):
     async for db_session in get_db():
         await update_user_status(db_session, telegram_id, 'cancel_user')
     await callback.bot.send_message(chat_id=telegram_id, text='Заявка отменена.')
+    await callback.bot.send_message(
+        chat_id=telegram_id,
+        text='Приветствуем в нашем проекте по поиску, обучению и тестированию новых сотрудников!\n\n'
+             'Для составления заявки нажмите *«Продолжить»*',
+        reply_markup=start_keyboard(),
+        parse_mode="Markdown")
 
 
 class CancelRequestForm(StatesGroup):
@@ -196,3 +220,9 @@ async def description(message: Message, state: FSMContext):
         chat_id=message.from_user.id,
         text=f"Заявка пользователя {telegram_id} отклонена. Причина отказа: {answer_admin}"
     )
+    await message.bot.send_message(
+        chat_id=telegram_id,
+        text='Приветствуем в нашем проекте по поиску, обучению и тестированию новых сотрудников!\n\n'
+             'Для составления заявки нажмите *«Продолжить»*',
+        reply_markup=start_keyboard(),
+        parse_mode="Markdown")
