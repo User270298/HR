@@ -95,3 +95,8 @@ async def update_user_status(db_session: AsyncSession, telegram_id: int, new_sta
         print(f"Ошибка при обновлении статуса: {e}")
         await db_session.rollback()
 
+
+async def get_all_users(db_session: AsyncSession):
+    stmt = select(User.name, User.position, User.status)
+    result = await db_session.execute(stmt)
+    return result.fetchall()

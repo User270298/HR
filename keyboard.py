@@ -21,3 +21,10 @@ def approved_keyboard(telegram_id):
         ]
     )
     return confirm_markup
+
+def admin_menu_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Просмотр всех пользователей", callback_data="admin_keyboard")],
+        ]
+    )

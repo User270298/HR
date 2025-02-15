@@ -1,25 +1,51 @@
 import re
-
 from aiogram import Router, F
 from aiogram.filters.command import Command
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
-from keyboard import start_keyboard, admin_keyboard, approved_keyboard
+from keyboard import start_keyboard, admin_keyboard, approved_keyboard, admin_menu_keyboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import StateFilter
-from database import add_user, get_db, get_position_by_telegram_id, update_user_status
+from database import add_user, get_db, get_position_by_telegram_id, update_user_status, get_all_users
 
 router = Router()
 ADMIN_ID = [947159905, 5584822662]
 
 
 @router.message(Command(commands=['start']))
-async def hello(message: Message):
-    await message.answer(
-        'Приветствуем в нашем проекте по поиску, обучению и тестированию новых сотрудников!\n\n'
-        'Для составления заявки нажмите *«Продолжить»*',
-        reply_markup=start_keyboard(),
-        parse_mode="Markdown")
+async def start_command(message: Message):
+    if message.from_user.id in ADMIN_ID:
+        await message.answer("Добро пожаловать, администратор!", reply_markup=admin_menu_keyboard())
+    else:
+        await message.answer(
+            'Приветствуем в нашем проекте по поиску, обучению и тестированию новых сотрудников!\n\n'
+            'Для составления заявки нажмите *«Продолжить»*',
+            reply_markup=start_keyboard(),
+            parse_mode="Markdown"
+        )
+
+
+@router.callback_query(F.data == "admin_keyboard")
+async def list_users(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_ID:
+        return
+
+    # Получаем сессию базы данных
+    async for db_session in get_db():
+        users = await get_all_users(db_session)  # Передаем сессию в функцию `get_all_users`
+
+        # Если пользователей нет
+        if not users:
+            await callback.message.answer("Нет зарегистрированных пользователей.")
+            return
+
+        # Формируем список пользователей
+        user_list = "\n".join(
+            [f"📌 *ФИО:* {user[0]}, *Позиция:* {user[1]}, *Статус:* {user[2]}" for user in users]
+        )
+
+        # Отправляем список
+        await callback.message.answer(f"📋 Список зарегистрированных пользователей:\n\n{user_list}", parse_mode="Markdown")
 
 
 class RequestForm(StatesGroup):
