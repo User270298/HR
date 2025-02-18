@@ -1,3 +1,5 @@
+import asyncio
+
 import aiosqlite
 from sqlalchemy import create_engine, Column, Integer, String, update
 from sqlalchemy.ext.declarative import declarative_base
@@ -20,6 +22,8 @@ class User(Base):
     contact_email = Column(String)
     contact_person = Column(String)
     status = Column(String, default="pending")
+    service_date = Column(String)
+    service_price = Column(String)
 
 
 # Создаем движок и сессию для SQLAlchemy
@@ -56,6 +60,8 @@ async def add_user(db_session, user_data):
         user.contact_email = user_data['contact_email']
         user.contact_person = user_data['contact_person']
         user.status = user_data['status']
+        user.service_date = user_data['service_date']
+        user.service_price = user_data['service_price']
     else:
         # Если пользователя нет, создаем новую запись
         user = User(**user_data)
@@ -95,3 +101,26 @@ async def update_user_status(db_session: AsyncSession, telegram_id: int, new_sta
         print(f"Ошибка при обновлении статуса: {e}")
         await db_session.rollback()
 
+
+async def addon(db_session: AsyncSession, telegram_id: int, service_date: str, service_price: str):
+    try:
+        stmt = update(User).where(User.telegram_id == telegram_id).values(service_date=service_date,
+                                                                          service_price=service_price)
+        await db_session.execute(stmt)
+        await db_session.commit()
+    except Exception as e:
+        # Обрабатываем ошибки транзакции
+        print(f"Ошибка при обновлении статуса: {e}")
+        await db_session.rollback()
+
+
+async def get_user(db_session: AsyncSession, telegram_id: int):
+    try:
+        stmt = select(User).where(User.telegram_id == telegram_id)
+        result = await db_session.execute(stmt)
+        return result.scalar_one_or_none()
+    except Exception as e:
+        await db_session.rollback()
+
+# async for db_session in get_db():
+#     asyncio.run(db_session,)

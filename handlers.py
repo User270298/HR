@@ -1,5 +1,5 @@
 import re
-
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters.command import Command
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
@@ -7,10 +7,10 @@ from keyboard import start_keyboard, admin_keyboard, approved_keyboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import StateFilter
-from database import add_user, get_db, get_position_by_telegram_id, update_user_status
+from database import add_user, get_db, get_position_by_telegram_id, update_user_status, get_user, addon
 
 router = Router()
-ADMIN_ID = [947159905, 5584822662]
+ADMIN_ID = [5584822662]  # 947159905,
 
 
 @router.message(Command(commands=['start']))
@@ -60,7 +60,7 @@ async def contact_email(message: Message, state: FSMContext):
     else:
         contact_number = message.text
 
-    if not re.match(r'^(\+7|8)\d{10}$', contact_number):
+    if not re.match(r'((8|\+7)[\- ]?)?(\(?\d{3}\)?[\- ]?)?[\d\- ]{7,10}', contact_number):
         await message.answer(
             "Некорректный номер телефона. Пожалуйста, введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX.")
         return
@@ -126,38 +126,49 @@ class ApprovedRequestForm(StatesGroup):
 async def approved(callback: CallbackQuery, state: FSMContext):
     telegram_id = callback.data.split('_')[1]
     await state.update_data(telegram_id=telegram_id)
-    await callback.message.answer("Введите *срок оказания услуг*:", parse_mode="Markdown")
+    await callback.message.answer("Введите *срок оказания услуг* (в формате ДД.ММ.ГГГГ):", parse_mode="Markdown")
     await state.set_state(ApprovedRequestForm.date)
 
 
 @router.message(StateFilter(ApprovedRequestForm.date))
 async def service_cost(message: Message, state: FSMContext):
-    await state.update_data(date=message.text)
-    await message.answer("Введите *стоимость оказываемых услуг*:", parse_mode="Markdown")
-    await state.set_state(ApprovedRequestForm.price)
+    try:
+        # Пытаемся преобразовать введенный текст в дату
+        date = datetime.strptime(message.text, "%d.%m.%Y")
+        await state.update_data(date=date.strftime("%d.%m.%Y"))
+        await message.answer("Введите *стоимость оказываемых услуг* (только число):", parse_mode="Markdown")
+        await state.set_state(ApprovedRequestForm.price)
+    except ValueError:
+        await message.answer("❌ Неверный формат даты. Пожалуйста, введите дату в формате ДД.ММ.ГГГГ:")
 
 
 @router.message(StateFilter(ApprovedRequestForm.price))
 async def send_confirmation(message: Message, state: FSMContext):
-    user_data = await state.get_data()
+    try:
+        await message.answer('Пользователю отправлено уведомление о поиске кандидата.')
+        # Пытаемся преобразовать введенный текст в число
+        service_price = float(message.text.replace(',', '.'))  # Поддержка как точки, так и запятой
+        await state.update_data(service_price=service_price)
+        user_data = await state.get_data()
+        service_date = user_data['date']
+        telegram_id = user_data['telegram_id']
+        async for db_session in get_db():
+            position = await get_position_by_telegram_id(db_session, telegram_id)
+            await update_user_status(db_session, telegram_id, 'approved_admin')
+            await addon(db_session, telegram_id, str(service_date), str(service_price))
 
-    telegram_id = user_data['telegram_id']
-    async for db_session in get_db():
-        position = await get_position_by_telegram_id(db_session, telegram_id)
-        await update_user_status(db_session, telegram_id, 'approved_admin')
-    service_date = user_data['date']
-    service_price = message.text
+        confirmation_message = (
+            f"Уважаемые коллеги! Благодарим за обращение в ООО АГРОКОР за поиском и обучением кандидата на должность "
+            f"*{position}*.\n\n"
+            f"📌 Сообщаем, что кандидат будет найден и обучен в срок до *{service_date}*.\n"
+            f"📌 Стоимость оказываемой услуги составит *{service_price:.2f}* рублей.\n\n"
+            "Для подтверждения, нажмите *«Подтвердить»*."
+        )
 
-    confirmation_message = (
-        f"Уважаемые коллеги! Благодарим за обращение в ООО АГРОКОР за поиском и обучением кандидата на должность "
-        f"*{position}*.\n\n"
-        f"📌 Сообщаем, что кандидат будет найден и обучен в срок до *{service_date}*.\n"
-        f"📌 Стоимость оказываемой услуги составит *{service_price}* рублей.\n\n"
-        "Для подтверждения, нажмите *«Подтвердить»*."
-    )
-
-    await message.bot.send_message(chat_id=telegram_id, text=confirmation_message, parse_mode="Markdown",
-                                   reply_markup=approved_keyboard(telegram_id))
+        await message.bot.send_message(chat_id=telegram_id, text=confirmation_message, parse_mode="Markdown",
+                                       reply_markup=approved_keyboard(telegram_id))
+    except ValueError:
+        await message.answer("❌ Неверный формат числа. Пожалуйста, введите стоимость услуг в виде числа:")
 
 
 @router.callback_query(F.data.startswith('conf_'))
@@ -173,6 +184,16 @@ async def confirm_user(callback: CallbackQuery, state: FSMContext):
              'Для составления заявки нажмите *«Продолжить»*',
         reply_markup=start_keyboard(),
         parse_mode="Markdown")
+    async for db_session in get_db():
+        user_info = await get_user(db_session, telegram_id)
+    for admin in ADMIN_ID:
+        await callback.bot.send_message(
+            chat_id=admin,
+            text=f"✅ Компания {user_info.name} подтвердила заявку по поиску {user_info.position}.\n"
+                 f"- Срок оказания услуг до {user_info.service_date}.\n"
+                 f"- Стоимость услуг {user_info.service_price} рублей.\n"
+                 f"- Контактный номер {user_info.contact_number}.\n"
+                 f"- Контактная электронная почта {user_info.contact_email}.\n")
 
 
 @router.callback_query(F.data.startswith('canc_'))
@@ -187,6 +208,16 @@ async def cancel_user(callback: CallbackQuery, state: FSMContext):
              'Для составления заявки нажмите *«Продолжить»*',
         reply_markup=start_keyboard(),
         parse_mode="Markdown")
+    async for db_session in get_db():
+        user_info = await get_user(db_session, telegram_id)
+    for admin in ADMIN_ID:
+        await callback.bot.send_message(
+            chat_id=admin,
+            text=f"❌ Компания {user_info.name} подтвердила заявку по поиску {user_info.position}.\n"
+                 f"- Срок оказания услуг до {user_info.service_date}.\n"
+                 f"- Стоимость услуг {user_info.service_price} рублей.\n"
+                 f"- Контактный номер {user_info.contact_number}.\n"
+                 f"- Контактная электронная почта {user_info.contact_email}.\n")
 
 
 class CancelRequestForm(StatesGroup):
