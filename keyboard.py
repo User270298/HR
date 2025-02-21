@@ -3,7 +3,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 def start_keyboard():
     inline_keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text='Продолжить', callback_data='continue')]])
+        inline_keyboard=[[InlineKeyboardButton(text='Оставить заявку на поиск сотрудника', callback_data='continue')],
+                         [InlineKeyboardButton(text='Посмотреть анкеты кандидатов', callback_data='ankets')],])
     return inline_keyboard
 
 def admin_keyboard(telegram_id):
