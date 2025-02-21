@@ -26,6 +26,18 @@ class User(Base):
     service_price = Column(String)
 
 
+class Candidate(Base):
+    __tablename__ = 'candidate'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)  # Добавляем первичный ключ
+    specialist = Column(String, index=True)
+    position = Column(String)
+    skills = Column(String)
+    experience = Column(String)
+    education = Column(String)
+    addon = Column(String)
+
+
 # Создаем движок и сессию для SQLAlchemy
 engine = create_async_engine(DATABASE_URL, echo=False, future=True)
 AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -43,6 +55,34 @@ async def get_db():
 
 
 from sqlalchemy.exc import IntegrityError
+
+
+async def add_candidate(db_session: AsyncSession, user_data: dict):
+    """
+    Добавляет нового кандидата в базу данных.
+
+    :param db_session: Асинхронная сессия SQLAlchemy.
+    :param user_data: Словарь с данными кандидата.
+    :return: Объект Candidate, если успешно добавлен.
+    """
+    # Создаем объект Candidate из переданных данных
+    new_candidate = Candidate(
+        specialist=user_data.get("specialist"),
+        position=user_data.get("position"),
+        skills=user_data.get("skills"),
+        experience=user_data.get("experience"),
+        education=user_data.get("education"),
+        addon=user_data.get("addon")
+    )
+
+    # Добавляем объект в сессию
+    db_session.add(new_candidate)
+
+    # Фиксируем изменения в базе данных
+    await db_session.commit()
+
+    # Обновляем объект, чтобы получить его ID (если нужно)
+    await db_session.refresh(new_candidate)
 
 
 async def add_user(db_session, user_data):
@@ -122,5 +162,12 @@ async def get_user(db_session: AsyncSession, telegram_id: int):
     except Exception as e:
         await db_session.rollback()
 
-# async for db_session in get_db():
-#     asyncio.run(db_session,)
+
+async def get_all_candidates(db_session: AsyncSession):
+    # Запрос для получения всех кандидатов
+    result = await db_session.execute(select(Candidate))
+
+    # Получаем все кандидаты из результата
+    candidates = result.scalars().all()
+
+    return candidates
