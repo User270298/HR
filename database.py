@@ -1,6 +1,3 @@
-import asyncio
-
-import aiosqlite
 from sqlalchemy import create_engine, Column, Integer, String, update
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -20,6 +17,7 @@ class User(Base):
     contact_number = Column(String)
     contact_email = Column(String)
     contact_person = Column(String)
+    quality=Column(String)
     status = Column(String, default="pending")
     service_date = Column(String)
     service_price = Column(String)
@@ -99,10 +97,11 @@ async def add_user(db_session, user_data):
         user.position = user_data['position']
         user.contact_number = user_data['contact_number']
         user.contact_email = user_data['contact_email']
+        user.quality = user_data['quality']
         user.contact_person = user_data['contact_person']
         user.status = user_data['status']
-        user.service_date = user_data['service_date']
-        user.service_price = user_data['service_price']
+        user.service_date = user_data.get('service_date', None)  # Если ключа нет, вернется None
+        user.service_price = user_data.get('service_price', None)
     else:
         # Если пользователя нет, создаем новую запись
         user = User(**user_data)

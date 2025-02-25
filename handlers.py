@@ -11,7 +11,7 @@ from database import add_user, get_db, get_position_by_telegram_id, update_user_
     get_all_candidates
 
 router = Router()
-ADMIN_ID = [ 5584822662]  # 947159905,
+ADMIN_ID = [ 947159905, 5584822662]  # 947159905,
 
 
 @router.message(Command(commands=['start']))
@@ -50,6 +50,7 @@ class RequestForm(StatesGroup):
     position = State()
     contact_number = State()
     contact_email = State()
+    quality = State()
     contact_person = State()
 
 
@@ -101,12 +102,18 @@ async def contact_person(message: Message, state: FSMContext):
     await state.update_data(contact_email=message.text)
 
     await message.answer("Введите *контактное лицо*:", parse_mode="Markdown")
+    await state.set_state(RequestForm.quality)
+
+@router.message(StateFilter(RequestForm.quality))
+async def quality(message: Message, state: FSMContext):
+    await state.update_data(contact_person=message.text)
+    await message.answer("Введите *необходимые качества кандидата*:", parse_mode="Markdown")
     await state.set_state(RequestForm.contact_person)
 
 
 @router.message(StateFilter(RequestForm.contact_person))
 async def confirm_request(message: Message, state: FSMContext, bot):
-    await state.update_data(contact_person=message.text)
+    await state.update_data(quality=message.text)
     user_data = await state.get_data()
 
     async for db_session in get_db():
@@ -116,6 +123,7 @@ async def confirm_request(message: Message, state: FSMContext, bot):
             'position': user_data['position'],
             'contact_number': user_data['contact_number'],
             'contact_email': user_data['contact_email'],
+            'quality': user_data['quality'],
             'contact_person': user_data['contact_person'],
             'status': "pending"
         })
@@ -124,6 +132,7 @@ async def confirm_request(message: Message, state: FSMContext, bot):
         f"✅ *Ваша заявка принята:*\n\n"
         f"📌 *Компания:* {user_data['name']}\n"
         f"📌 *Позиция искомого кандидата:* {user_data['position']}\n"
+        f"📌 *Качества кандидата:* {user_data['quality']}\n"
         f"📌 *Контактный номер:* {user_data['contact_number']}\n"
         f"📌 *Почта:* {user_data['contact_email']}\n"
         f"📌 *Контактное лицо:* {user_data['contact_person']}\n\n"
@@ -133,6 +142,7 @@ async def confirm_request(message: Message, state: FSMContext, bot):
         f"✅ *Поступила заявка от {message.from_user.full_name}:*\n\n"
         f"📌 *Компания:* {user_data['name']}\n"
         f"📌 *Позиция искомого кандидата:* {user_data['position']}\n"
+        f"📌 *Качества кандидата:* {user_data['quality']}\n"
         f"📌 *Контактный номер:* {user_data['contact_number']}\n"
         f"📌 *Почта:* {user_data['contact_email']}\n"
         f"📌 *Контактное лицо:* {user_data['contact_person']}\n\n"
@@ -149,7 +159,7 @@ class ApprovedRequestForm(StatesGroup):
 async def approved(callback: CallbackQuery, state: FSMContext):
     telegram_id = callback.data.split('_')[1]
     await state.update_data(telegram_id=telegram_id)
-    await callback.message.answer("Введите *срок оказания услуг* (в формате ДД.ММ.ГГГГ):", parse_mode="Markdown")
+    await callback.message.answer("Введите *приблизительное время оказания услуг* (в формате ДД.ММ.ГГГГ):", parse_mode="Markdown")
     await state.set_state(ApprovedRequestForm.date)
 
 
@@ -183,7 +193,7 @@ async def send_confirmation(message: Message, state: FSMContext):
         confirmation_message = (
             f"Уважаемые коллеги! Благодарим за обращение в ООО АГРОКОР за поиском и обучением кандидата на должность "
             f"*{position}*.\n\n"
-            f"📌 Сообщаем, что кандидат будет найден и обучен в срок до *{service_date}*.\n"
+            f"📌 Сообщаем, что кандидат будет найден и обучен приблизительно в срок до *{service_date}*.\n"
             f"📌 Стоимость оказываемой услуги составит *{service_price:.2f}* рублей.\n\n"
             "Для подтверждения, нажмите *«Подтвердить»*."
         )
@@ -213,7 +223,7 @@ async def confirm_user(callback: CallbackQuery, state: FSMContext):
         await callback.bot.send_message(
             chat_id=admin,
             text=f"✅ Компания {user_info.name} подтвердила заявку по поиску {user_info.position}.\n"
-                 f"- Срок оказания услуг до {user_info.service_date}.\n"
+                 f"- Приблизительный срок оказания услуг до {user_info.service_date}.\n"
                  f"- Стоимость услуг {user_info.service_price} рублей.\n"
                  f"- Контактный номер {user_info.contact_number}.\n"
                  f"- Контактная электронная почта {user_info.contact_email}.\n")
@@ -237,7 +247,7 @@ async def cancel_user(callback: CallbackQuery, state: FSMContext):
         await callback.bot.send_message(
             chat_id=admin,
             text=f"❌ Компания {user_info.name} подтвердила заявку по поиску {user_info.position}.\n"
-                 f"- Срок оказания услуг до {user_info.service_date}.\n"
+                 f"- Приблизительный срок оказания услуг до {user_info.service_date}.\n"
                  f"- Стоимость услуг {user_info.service_price} рублей.\n"
                  f"- Контактный номер {user_info.contact_number}.\n"
                  f"- Контактная электронная почта {user_info.contact_email}.\n")
@@ -298,9 +308,14 @@ async def admin(message: Message, state: FSMContext):
         await message.answer('Вы не являетесь админом')
         return
 
+    # Очистка состояния перед началом нового процесса
+    await state.clear()
+
+    print(f"DEBUG: {message.from_user.id} нажал /admin, текущее состояние: {await state.get_state()}")  # Лог
+
     await message.answer(
         "Давайте добавим нового кандидата.\n\n"
-        "Введите специализацию кандидата:"  # Убираем клавиатуру
+        "Введите специализацию кандидата:"
     )
     await state.set_state(CandidateForm.specialist)  # Устанавливаем первое состояние
 
@@ -343,16 +358,13 @@ async def process_education(message: Message, state: FSMContext):
 @router.message(StateFilter(CandidateForm.addon))
 async def process_addon(message: Message, state: FSMContext):
     await state.update_data(addon=message.text)  # Сохраняем дополнительную информацию
-
-    # Получаем все данные из состояния
     data = await state.get_data()
 
-    # Используем функцию add_candidate для добавления кандидата
     async for db_session in get_db():
         await add_candidate(db_session, data)
 
-    # Завершаем состояние
+    # Завершаем состояние, чтобы избежать путаницы в будущем
     await state.clear()
 
-    # Отправляем сообщение об успешном добавлении
     await message.answer("Кандидат успешно добавлен в базу данных!")
+
