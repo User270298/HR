@@ -84,7 +84,7 @@ async def contact_email(message: Message, state: FSMContext):
     else:
         contact_number = message.text
 
-    if not re.match(r'((8|\+7)[\- ]?)?(\(?\d{3}\)?[\- ]?)?[\d\- ]{7,10}', contact_number):
+    if not re.match(r'^([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)$|(^\+?[0-9]{1,3}[- ]?[0-9]{3}[- ]?[0-9]{3}[- ]?[0-9]{4}$)', contact_number):
         await message.answer(
             "Некорректный номер телефона. Пожалуйста, введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX.")
         return
