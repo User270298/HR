@@ -22,3 +22,17 @@ def approved_keyboard(telegram_id):
         ]
     )
     return confirm_markup
+
+def candidate_keyboard(candidate_id):
+    """
+    Создает клавиатуру для анкеты кандидата.
+    Для обычных пользователей показывает только телефон HR,
+    для админов добавляет кнопку закрытия анкеты.
+    """
+      # Проверка на админа
+    inline_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Закрыть анкету", callback_data=f"close_candidate_{candidate_id}")]
+        ]
+    )
+    return inline_keyboard

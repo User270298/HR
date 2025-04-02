@@ -33,7 +33,8 @@ class Candidate(Base):
     experience = Column(String)
     education = Column(String)
     addon = Column(String)
-
+    service = Column(String)
+    status = Column(String, default="active")  # Добавляем поле статуса
 
 # Создаем движок и сессию для SQLAlchemy
 engine = create_async_engine(DATABASE_URL, echo=False, future=True)
@@ -68,7 +69,9 @@ async def add_candidate(db_session: AsyncSession, user_data: dict):
         skills=user_data.get("skills"),
         experience=user_data.get("experience"),
         education=user_data.get("education"),
-        addon=user_data.get("addon")
+        addon=user_data.get("addon"),
+        service=user_data.get("service"),
+        status=user_data.get("status")
     )
 
     # Добавляем объект в сессию
@@ -164,12 +167,12 @@ async def get_user(db_session: AsyncSession, telegram_id: int):
 
 
 async def get_all_candidates(db_session: AsyncSession):
-    # Запрос для получения всех кандидатов
-    result = await db_session.execute(select(Candidate))
-
+    # Запрос для получения всех активных кандидатов
+    result = await db_session.execute(select(Candidate).where(Candidate.status == "active"))
+    
     # Получаем все кандидаты из результата
     candidates = result.scalars().all()
-
+    
     return candidates
     
 
@@ -187,3 +190,19 @@ async def get_pending_requests(db_session: AsyncSession):
     pending_requests = result.scalars().all()
     
     return pending_requests
+
+async def update_candidate_status(db_session: AsyncSession, candidate_id: int, new_status: str):
+    """
+    Обновляет статус кандидата
+    
+    :param db_session: Асинхронная сессия SQLAlchemy
+    :param candidate_id: ID кандидата
+    :param new_status: Новый статус
+    """
+    try:
+        stmt = update(Candidate).where(Candidate.id == candidate_id).values(status=new_status)
+        await db_session.execute(stmt)
+        await db_session.commit()
+    except Exception as e:
+        print(f"Ошибка при обновлении статуса кандидата: {e}")
+        await db_session.rollback()

@@ -3,13 +3,15 @@ from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters.command import Command
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
-from keyboard import start_keyboard, admin_keyboard, approved_keyboard
+from keyboard import start_keyboard, admin_keyboard, approved_keyboard, candidate_keyboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import StateFilter
 from database import add_user, get_db, get_position_by_telegram_id, update_user_status, get_user, addon, add_candidate, \
-    get_all_candidates, get_pending_requests
+    get_all_candidates, get_pending_requests, update_candidate_status
 import logging
+from sqlalchemy import select
+from database import Candidate
 
 router = Router()
 ADMIN_ID = [ 947159905, 5584822662]  # 947159905,
@@ -72,16 +74,17 @@ async def show_candidates(callback: CallbackQuery):
     for candidate in candidates:
         message = (
             f'🚀 Анкета кандидата 🚀\n'
-            f'🔹 Специалист по: {candidate.specialist}\n'
-            f'🔹 Должность: {candidate.position}\n'
-            f'🔹 Что умею лучше всего? {candidate.skills}\n'
-            f'🔹 Мои достижения: {candidate.experience}\n'
-            f'🔹 Образование: {candidate.education}\n'
-            f'🔹 Дополнительно: {candidate.addon}\n\n'
-            f'📩 Хотите узнать больше? Свяжитесь с нашим HR: ...'
+            f'🔹*Специалист по*: {candidate.specialist}\n'
+            f'🔹 *Должность*: {candidate.position}\n'
+            f'🔹 *Что умеет лучше всего*: {candidate.skills}\n'
+            f'🔹 *Достижения*: {candidate.experience}\n'
+            f'🔹 *Образование*: {candidate.education}\n'
+            f'🔹 *Дополнительно*: {candidate.addon}\n'
+            f'🔹 *Сервис*: {candidate.service}\n'
+            f'📩 Хотите узнать больше? Свяжитесь с нашим HR: +7(928)907-53-00'
         )
         # Отправляем сообщение для каждого кандидата
-        await callback.message.answer(message)
+        await callback.message.answer(message, parse_mode="Markdown")
 
 class RequestForm(StatesGroup):
     name = State()
@@ -337,6 +340,7 @@ class CandidateForm(StatesGroup):
     experience = State()
     education = State()
     addon = State()
+    service = State()
 
 
 @router.message(Command(commands=['add']))
@@ -392,12 +396,18 @@ async def process_education(message: Message, state: FSMContext):
     await message.answer("Введите дополнительную информацию о кандидате:")
     await state.set_state(CandidateForm.addon)  # Переходим к следующему состоянию
 
-
 @router.message(StateFilter(CandidateForm.addon))
 async def process_addon(message: Message, state: FSMContext):
     await state.update_data(addon=message.text)  # Сохраняем дополнительную информацию
-    data = await state.get_data()
+    await message.answer("Введите сервис, который предлагается кандидату:")
+    await state.set_state(CandidateForm.service)  # Переходим к следующему состоянию
 
+
+@router.message(StateFilter(CandidateForm.service))
+async def process_service(message: Message, state: FSMContext):
+    await state.update_data(service=message.text)  # Сохраняем дополнительную информацию
+    data = await state.get_data()
+    await state.update_data(status="active")
     async for db_session in get_db():
         await add_candidate(db_session, data)
 
@@ -407,4 +417,55 @@ async def process_addon(message: Message, state: FSMContext):
     await message.answer("Кандидат успешно добавлен в базу данных!")
 
 
+@router.message(Command(commands=['close']))
+async def show_candidates_for_close(message: Message):
+    telegram_id = message.from_user.id
+    if telegram_id not in ADMIN_ID:
+        await message.answer('Вы не являетесь админом')
+        return
+    # Получаем всех кандидатов из базы асинхронно
+    async for db_session in get_db():
+        candidates = await get_all_candidates(db_session)
+    if candidates==[]:
+        await message.answer('Нет доступных анкет!')
+        return
+    # Формируем сообщения для каждого кандидата
+    for candidate in candidates:
+        message_text = (
+            f'🚀 Анкета кандидата 🚀\n'
+            f'🔹*Специалист по*: {candidate.specialist}\n'
+            f'🔹 *Должность*: {candidate.position}\n'
+            f'🔹 *Что умеет лучше всего*: {candidate.skills}\n'
+            f'🔹 *Достижения*: {candidate.experience}\n'
+            f'🔹 *Образование*: {candidate.education}\n'
+            f'🔹 *Дополнительно*: {candidate.addon}\n'
+            f'🔹 *Сервис*: {candidate.service}'
+        )
+        # Отправляем сообщение для каждого кандидата
+        await message.answer(message_text, parse_mode="Markdown",
+                           reply_markup=candidate_keyboard(candidate.id))
 
+@router.callback_query(F.data.startswith('close_candidate_'))
+async def close_candidate(callback: CallbackQuery):
+    # Проверяем, является ли пользователь администратором
+    if callback.from_user.id not in ADMIN_ID:
+        await callback.answer("У вас нет доступа к этой функции.")
+        return
+        
+    candidate_id = int(callback.data.split('_')[-1])
+    
+    # Получаем информацию о кандидате
+    async for db_session in get_db():
+        result = await db_session.execute(select(Candidate).where(Candidate.id == candidate_id))
+        candidate = result.scalar_one_or_none()
+        
+        if candidate:
+            # Обновляем статус кандидата на "closed"
+            await update_candidate_status(db_session, candidate_id, "closed")
+            
+            # Отправляем уведомление админу
+            await callback.message.answer(
+                f"✅ Анкета кандидата на должность {candidate.position} успешно закрыта."
+            )
+        else:
+            await callback.answer("Кандидат не найден.")
