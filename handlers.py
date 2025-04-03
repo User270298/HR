@@ -3,7 +3,7 @@ from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters.command import Command
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
-from keyboard import start_keyboard, admin_keyboard, approved_keyboard, candidate_keyboard
+from keyboard import start_keyboard, admin_keyboard, approved_keyboard, candidate_keyboard, admin_help_keyboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import StateFilter
@@ -16,14 +16,16 @@ from database import Candidate
 router = Router()
 ADMIN_ID = [ 947159905, 5584822662]  # 947159905,
 
-@router.message(Command(commands=['admin']))
-async def admin_panel(message: Message):
-    logging.info(f"Команда /admin вызвана пользователем {message.from_user.id}")
+
+
+@router.callback_query(F.data=='admin')
+async def admin_panel(callback: CallbackQuery):
+    logging.info(f"Команда /admin вызвана пользователем {callback.from_user.id}")
     
     # Проверяем, является ли пользователь администратором
-    if message.from_user.id not in ADMIN_ID:
-        logging.info(f"Пользователь {message.from_user.id} не является администратором")
-        await message.answer("У вас нет доступа к этой команде.")
+    if callback.from_user.id not in ADMIN_ID:
+        logging.info(f"Пользователь {callback.from_user.id} не является администратором")
+        await callback.message.answer("У вас нет доступа к этой команде.")
         return
     
     # Получаем все неподтвержденные заявки
@@ -33,11 +35,11 @@ async def admin_panel(message: Message):
     logging.info(f"Найдено {len(pending_requests) if pending_requests else 0} неподтвержденных заявок")
     
     if not pending_requests:
-        await message.answer("Неподтвержденных заявок нет.")
+        await callback.message.answer("Неподтвержденных заявок нет.")
         return
     
     # Отправляем сообщение с информацией о каждой заявке
-    await message.answer("📋 *Список неподтвержденных заявок:*", parse_mode="Markdown")
+    await callback.message.answer("📋 *Список неподтвержденных заявок:*", parse_mode="Markdown")
     
     for request in pending_requests:
         logging.info(f"Отправка информации о заявке от пользователя {request.telegram_id}")
@@ -51,7 +53,7 @@ async def admin_panel(message: Message):
         )
         
         # Отправляем информацию о заявке с кнопками для подтверждения/отклонения
-        await message.answer(text=request_info, parse_mode="Markdown", 
+        await callback.message.answer(text=request_info, parse_mode="Markdown", 
                             reply_markup=admin_keyboard(request.telegram_id))
 
 @router.message(Command(commands=['start']))
@@ -343,19 +345,19 @@ class CandidateForm(StatesGroup):
     service = State()
 
 
-@router.message(Command(commands=['add']))
-async def admin(message: Message, state: FSMContext):
-    telegram_id = message.from_user.id
+@router.callback_query(F.data=='add')
+async def admin(callback: CallbackQuery, state: FSMContext):
+    telegram_id = callback.from_user.id
     if telegram_id not in ADMIN_ID:
-        await message.answer('Вы не являетесь админом')
+        await callback.answer('Вы не являетесь админом')
         return
 
     # Очистка состояния перед началом нового процесса
     await state.clear()
 
-    print(f"DEBUG: {message.from_user.id} нажал /admin, текущее состояние: {await state.get_state()}")  # Лог
+    print(f"DEBUG: {callback.from_user.id} нажал /admin, текущее состояние: {await state.get_state()}")  # Лог
 
-    await message.answer(
+    await callback.message.answer(
         "Давайте добавим нового кандидата.\n\n"
         "Введите специализацию кандидата:"
     )
@@ -399,7 +401,7 @@ async def process_education(message: Message, state: FSMContext):
 @router.message(StateFilter(CandidateForm.addon))
 async def process_addon(message: Message, state: FSMContext):
     await state.update_data(addon=message.text)  # Сохраняем дополнительную информацию
-    await message.answer("Введите сервис, который предлагается кандидату:")
+    await message.answer("Введите сервис, сопровождающий кандидата:")
     await state.set_state(CandidateForm.service)  # Переходим к следующему состоянию
 
 
@@ -417,17 +419,17 @@ async def process_service(message: Message, state: FSMContext):
     await message.answer("Кандидат успешно добавлен в базу данных!")
 
 
-@router.message(Command(commands=['close']))
-async def show_candidates_for_close(message: Message):
-    telegram_id = message.from_user.id
+@router.callback_query(F.data=='close')
+async def show_candidates_for_close(callback: CallbackQuery):
+    telegram_id = callback.from_user.id
     if telegram_id not in ADMIN_ID:
-        await message.answer('Вы не являетесь админом')
+        await callback.answer('Вы не являетесь админом')
         return
     # Получаем всех кандидатов из базы асинхронно
     async for db_session in get_db():
         candidates = await get_all_candidates(db_session)
     if candidates==[]:
-        await message.answer('Нет доступных анкет!')
+        await callback.message.answer('Нет доступных анкет!')
         return
     # Формируем сообщения для каждого кандидата
     for candidate in candidates:
@@ -442,7 +444,7 @@ async def show_candidates_for_close(message: Message):
             f'🔹 *Сервис*: {candidate.service}'
         )
         # Отправляем сообщение для каждого кандидата
-        await message.answer(message_text, parse_mode="Markdown",
+        await callback.message.answer(message_text, parse_mode="Markdown",
                            reply_markup=candidate_keyboard(candidate.id))
 
 @router.callback_query(F.data.startswith('close_candidate_'))
@@ -469,3 +471,34 @@ async def close_candidate(callback: CallbackQuery):
             )
         else:
             await callback.answer("Кандидат не найден.")
+
+
+
+@router.message(Command(commands=['help']))
+async def help_command(message: Message):
+    if message.from_user.id in ADMIN_ID:
+        # Помощь для админов
+        help_text = (
+            "👨‍💼 *Панель администратора*\n\n"
+            "Доступные команды:\n"
+        )
+        await message.answer(help_text, parse_mode="Markdown", reply_markup=admin_help_keyboard())
+    else:
+        # Помощь для обычных пользователей
+        help_text = (
+            "👋 *Добро пожаловать в HR-бот АГРОКОР!*\n\n"
+            "🤖 *Что умеет бот:*\n"
+            "• Создание заявки на поиск сотрудника\n"
+            "• Просмотр доступных анкет кандидатов\n\n"
+            "📝 *Как использовать:*\n"
+            "1. Нажмите кнопку «Оставить заявку на поиск сотрудника»\n"
+            "2. Заполните все необходимые поля\n"
+            "3. После отправки заявки мы свяжемся с вами для обсуждения деталей\n\n"
+            "📋 *Просмотр анкет:*\n"
+            "• Нажмите кнопку «Посмотреть анкеты кандидатов»\n"
+            "• Выберите подходящего кандидата\n"
+            "• Свяжитесь с HR для получения дополнительной информации\n\n"
+            "❓ *Нужна помощь?*\n"
+            "Свяжитесь с нашим HR: +7(928)907-53-00"
+        )
+        await message.answer(help_text, parse_mode="Markdown")

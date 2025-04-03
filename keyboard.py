@@ -36,3 +36,14 @@ def candidate_keyboard(candidate_id):
         ]
     )
     return inline_keyboard
+
+def admin_help_keyboard():
+    """Создает клавиатуру с командами для админов"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Просмотр неподтвержденных заявок", callback_data="admin")],
+            [InlineKeyboardButton(text="➕ Добавить кандидата", callback_data="add")],
+            [InlineKeyboardButton(text="❌ Закрыть анкету", callback_data="close")]
+        ]
+    )
+    return keyboard
